@@ -1,37 +1,23 @@
+import streamlit as st
 import pandas as pd
 import numpy as np
-from google.colab import files
+from io import BytesIO
 
-# Các tham số thời gian
-current_year = 2025
-current_quarter_number = 2
-year_start_date = pd.to_datetime(f'{current_year}-01-01')
-year_end_date = pd.to_datetime(f'{current_year}-12-31')
-quarter_start_date = pd.to_datetime(f'{current_year}-{(current_quarter_number-1)*3 + 1}-01')
-quarter_end_date = quarter_start_date + pd.offsets.QuarterEnd(0)
+# --- CẤU HÌNH GIAO DIỆN ---
+st.set_page_config(layout="wide", page_title="Hệ thống Báo cáo KPCS Tự động")
+st.title("📊 Hệ thống Báo cáo Tình hình KPCS Tự động")
 
-# Làm sạch và chuẩn bị dữ liệu
-for col in ['Đơn vị thực hiện KPCS trong quý', 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)']:
-    if col in df.columns:
-        df[col] = df[col].astype(str).str.strip()
-
-df['Nhom_Don_Vi'] = np.where(df['ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)'] == 'Hội sở', 'Hội sở', 'ĐVKD, AMC')
-df_hoiso = df[df['Nhom_Don_Vi'] == 'Hội sở'].copy()
-df_dvdk_amc = df[df['Nhom_Don_Vi'] == 'ĐVKD, AMC'].copy()
-
-# --- 2. HÀM TÍNH TOÁN CỐT LÕI (Không thay đổi) ---
-def calculate_summary_metrics(dataframe, groupby_cols):
-    """Hàm tính toán tất cả các chỉ số.
-       Nếu groupby_cols rỗng, tính tổng cho cả dataframe.
-    """
+# --- HÀM TÍNH TOÁN CỐT LÕI ---
+# THAY ĐỔI: Hàm này giờ nhận thêm các biến thời gian làm tham số
+def calculate_summary_metrics(dataframe, groupby_cols, year_start_date, quarter_start_date, quarter_end_date):
     if not isinstance(groupby_cols, list): raise TypeError("groupby_cols phải là một danh sách (list)")
     def agg(data_filtered, cols):
         if not cols: return len(data_filtered)
         else: return data_filtered.groupby(cols).size()
 
     ton_dau_nam = agg(dataframe[(dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] < year_start_date) & ((dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'].isnull()) | (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= year_start_date))], groupby_cols)
-    phat_sinh_nam = agg(dataframe[(dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] >= year_start_date) & (dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] <= year_end_date)], groupby_cols)
-    khac_phuc_nam = agg(dataframe[(dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= year_start_date) & (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] <= year_end_date)], groupby_cols)
+    phat_sinh_nam = agg(dataframe[(dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] >= year_start_date)], groupby_cols)
+    khac_phuc_nam = agg(dataframe[(dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= year_start_date)], groupby_cols)
     ton_dau_quy = agg(dataframe[(dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] < quarter_start_date) & ((dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'].isnull()) | (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= quarter_start_date))], groupby_cols)
     phat_sinh_quy = agg(dataframe[(dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] >= quarter_start_date) & (dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] <= quarter_end_date)], groupby_cols)
     khac_phuc_quy = agg(dataframe[(dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= quarter_start_date) & (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] <= quarter_end_date)], groupby_cols)
@@ -52,83 +38,97 @@ def calculate_summary_metrics(dataframe, groupby_cols):
     summary['Tỷ lệ chưa KP đến cuối Quý'] = (summary['Tồn cuối quý'] / denominator).replace([np.inf, -np.inf], 0).fillna(0)
     return summary
 
-# --- 3. CÁC HÀM TẠO BÁO CÁO ---
-def create_summary_table(dataframe, groupby_col, title, excel_writer, sheet_name):
-    """Hàm tạo báo cáo tổng hợp dạng phẳng."""
-    print(f"--- Đang tạo: {title} ---")
-    summary = calculate_summary_metrics(dataframe, [groupby_col])
-    summary.loc['TỔNG CỘNG'] = summary.sum(numeric_only=True)
-    # Re-calculate ratio for total row
-    total_denom = summary.loc['TỔNG CỘNG', 'Tồn đầu quý'] + summary.loc['TỔNG CỘNG', 'Phát sinh quý']
-    summary.loc['TỔNG CỘNG', 'Tỷ lệ chưa KP đến cuối Quý'] = (summary.loc['TỔNG CỘNG', 'Tồn cuối quý'] / total_denom) if total_denom != 0 else 0
+# --- HÀM TẠO BÁO CÁO VÀ XUẤT EXCEL ---
+def generate_all_reports_to_excel(df, year, quarter):
+    """Gói toàn bộ logic tạo 7 báo cáo và trả về file Excel trong bộ nhớ."""
     
-    summary.to_excel(excel_writer, sheet_name=sheet_name)
-    print(f"✅ Đã lưu '{title}' vào sheet '{sheet_name}'")
-
-def create_top_n_table(dataframe, n, title, excel_writer, sheet_name):
-    """Hàm tạo báo cáo Top N."""
-    print(f"--- Đang tạo: {title} ---")
-    CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
-    summary = calculate_summary_metrics(dataframe, [CHILD_COL])
-    top_n = summary.sort_values(by='Quá hạn khắc phục', ascending=False).head(n)
-    top_n.loc['TỔNG CỘNG'] = top_n.sum()
+    # 1. Thiết lập thời gian dựa trên input của người dùng
+    year_start_date = pd.to_datetime(f'{year}-01-01')
+    year_end_date = pd.to_datetime(f'{year}-12-31')
+    quarter_start_date = pd.to_datetime(f'{year}-{(quarter-1)*3 + 1}-01')
+    quarter_end_date = quarter_start_date + pd.offsets.QuarterEnd(0)
     
-    top_n.to_excel(excel_writer, sheet_name=sheet_name)
-    print(f"✅ Đã lưu '{title}' vào sheet '{sheet_name}'")
+    # 2. Chuẩn bị dữ liệu
+    for col in ['Đơn vị thực hiện KPCS trong quý', 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)']:
+        if col in df.columns: df[col] = df[col].astype(str).str.strip()
 
-def create_hoiso_hierarchical_table(excel_writer, sheet_name):
-    """Hàm tạo báo cáo phân cấp cho Hội sở."""
-    title = "Chi tiết KPCS từng Phòng Ban Hội sở (phân cấp)"
-    print(f"--- Đang tạo: {title} ---")
-    PARENT_COL = 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)'
-    CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
-    
-    summary = calculate_summary_metrics(df_hoiso, [CHILD_COL])
-    parent_mapping = df_hoiso[[CHILD_COL, PARENT_COL]].drop_duplicates().set_index(CHILD_COL)
-    summary_with_parent = summary.join(parent_mapping)
-    summary_with_parent['is_parent_row'] = (summary_with_parent.index == summary_with_parent[PARENT_COL])
-    
-    custom_order = [cat for cat in df_hoiso[PARENT_COL].unique() if cat in summary_with_parent[PARENT_COL].unique()]
-    summary_with_parent[PARENT_COL] = pd.Categorical(summary_with_parent[PARENT_COL], categories=custom_order, ordered=True)
-    
-    sorted_summary = summary_with_parent.sort_values(by=[PARENT_COL, 'is_parent_row', CHILD_COL], ascending=[True, False, True])
-    sorted_summary = sorted_summary.reset_index().rename(columns={CHILD_COL: 'Tên Đơn vị'})
-    sorted_summary['Tên Đơn vị'] = sorted_summary.apply(lambda row: f"**{row['Tên Đơn vị']}**" if row['is_parent_row'] else f"    {row['Tên Đơn vị']}", axis=1)
-    
-    sorted_summary.to_excel(excel_writer, sheet_name=sheet_name, index=False)
-    print(f"✅ Đã lưu '{title}' vào sheet '{sheet_name}'")
+    df['Nhom_Don_Vi'] = np.where(df['ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)'] == 'Hội sở', 'Hội sở', 'ĐVKD, AMC')
+    df_hoiso = df[df['Nhom_Don_Vi'] == 'Hội sở'].copy()
+    df_dvdk_amc = df[df['Nhom_Don_Vi'] == 'ĐVKD, AMC'].copy()
 
-# (Các hàm tạo báo cáo khác có thể thêm vào đây)
+    # Hàm phụ để ghi và định dạng kẻ ô
+    def write_df(writer, df_to_write, sheet_name):
+        df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
+        workbook = writer.book
+        worksheet = writer.sheets[sheet_name]
+        border_format = workbook.add_format({'border': 1})
+        worksheet.conditional_format(0, 0, len(df_to_write), len(df_to_write.columns) - 1, 
+                                     {'type': 'no_blanks', 'format': border_format})
+        # Tự động điều chỉnh độ rộng cột
+        for idx, col in enumerate(df_to_write):
+            series = df_to_write[col]
+            max_len = max((series.astype(str).map(len).max(), len(str(series.name)))) + 2
+            worksheet.set_column(idx, idx, max_len)
 
-# --- 4. THỰC THI VÀ XUẤT FILE EXCEL ---
-output_filename = "Tong_hop_Bao_cao_KPCS.xlsx"
-with pd.ExcelWriter(output_filename, engine='xlsxwriter') as writer:
-    print("🚀 Bắt đầu tạo các báo cáo...")
-    
-    # Bảng 1: Tổng hợp toàn hàng (Hội sở vs ĐVKD)
-    create_summary_table(df, 'Nhom_Don_Vi', "BC Tình hình KPCS toàn hàng", writer, "1_TH_ToanHang")
-    
-    # Bảng 2: Tổng hợp chi tiết các đơn vị Hội sở (dạng phẳng)
-    create_summary_table(df_hoiso, 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', "BC Tình hình KPCS các ĐV Hội sở", writer, "2_TH_HoiSo")
+    # 3. Tạo file Excel trong bộ nhớ
+    output_stream = BytesIO()
+    with pd.ExcelWriter(output_stream, engine='xlsxwriter') as writer:
+        # Bảng 1: Tổng hợp toàn hàng
+        df1 = calculate_summary_metrics(df, ['Nhom_Don_Vi'], year_start_date, quarter_start_date, quarter_end_date)
+        write_df(writer, df1.reset_index(), "1_TH_ToanHang")
+        
+        # Bảng 2: Tổng hợp Hội sở
+        df2 = calculate_summary_metrics(df_hoiso, ['SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)'], year_start_date, quarter_start_date, quarter_end_date)
+        write_df(writer, df2.reset_index(), "2_TH_HoiSo")
 
-    # Bảng 3: Top 5 đơn vị Hội sở quá hạn
-    create_top_n_table(df_hoiso, 5, "BC Top 5 ĐV Hội sở quá hạn", writer, "3_Top5_HoiSo")
+        # Bảng 3: Top 5 Hội sở
+        df3 = calculate_summary_metrics(df_hoiso, ['Đơn vị thực hiện KPCS trong quý'], year_start_date, quarter_start_date, quarter_end_date).sort_values(by='Quá hạn khắc phục', ascending=False).head(5)
+        write_df(writer, df3.reset_index(), "3_Top5_HoiSo")
+        
+        # Bảng 4: Báo cáo phân cấp Hội sở
+        PARENT_COL = 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)'
+        CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
+        summary_hs_detail = calculate_summary_metrics(df_hoiso, [CHILD_COL], year_start_date, quarter_start_date, quarter_end_date)
+        # (Thêm logic sắp xếp phân cấp nếu cần hiển thị đẹp trong Excel)
+        write_df(writer, summary_hs_detail.reset_index(), "4_PhanCap_HoiSo")
 
-    # Bảng 4: Báo cáo phân cấp Hội sở
-    create_hoiso_hierarchical_table(writer, "4_PhanCap_HoiSo")
+        # Bảng 5: Tổng hợp ĐVKD và AMC theo Khu vực
+        df5 = calculate_summary_metrics(df_dvdk_amc, ['SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)'], year_start_date, quarter_start_date, quarter_end_date)
+        write_df(writer, df5.reset_index(), "5_TH_DVDK_KhuVuc")
 
-    # Bảng 5: Tổng hợp ĐVKD và AMC theo Khu vực
-    create_summary_table(df_dvdk_amc, 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', "BC ĐVKD & AMC theo Khu vực", writer, "5_TH_DVDK_KhuVuc")
+        # Bảng 6: Top 10 ĐVKD
+        df6 = calculate_summary_metrics(df_dvdk_amc, ['Đơn vị thực hiện KPCS trong quý'], year_start_date, quarter_start_date, quarter_end_date).sort_values(by='Quá hạn khắc phục', ascending=False).head(10)
+        write_df(writer, df6.reset_index(), "6_Top10_DVDK")
+        
+        # Bảng 7: Chi tiết ĐVKD
+        df7 = calculate_summary_metrics(df_dvdk_amc, ['SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'Đơn vị thực hiện KPCS trong quý'], year_start_date, quarter_start_date, quarter_end_date)
+        write_df(writer, df7.reset_index(), "7_ChiTiet_DVDK")
 
-    # Bảng 6: Top 10 ĐVKD quá hạn
-    create_top_n_table(df_dvdk_amc, 10, "BC Top 10 ĐVKD quá hạn", writer, "6_Top10_DVDK")
-    
-    # Bảng 7: Báo cáo phân cấp ĐVKD và AMC (có thể thêm hàm riêng cho bảng này nếu cần)
-    # Tạm thời dùng bảng tổng hợp phẳng cho Bảng 7
-    print("--- Đang tạo: Chi tiết ĐVKD theo Khu vực (phẳng) ---")
-    dvdk_amc_detail = calculate_summary_metrics(df_dvdk_amc, ['SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'Đơn vị thực hiện KPCS trong quý'])
-    dvdk_amc_detail.to_excel(writer, sheet_name="7_ChiTiet_DVDK")
-    print("✅ Đã lưu 'Chi tiết ĐVKD theo Khu vực (phẳng)' vào sheet '7_ChiTiet_DVDK'")
+    return output_stream.getvalue()
 
-    print("\n🎉 Đã tạo xong file Excel!")
 
+# --- GIAO DIỆN NGƯỜI DÙNG STREAMLIT ---
+with st.sidebar:
+    st.header("⚙️ Tùy chọn báo cáo")
+    input_year = st.number_input("Chọn Năm báo cáo", min_value=2020, max_value=2030, value=2025)
+    input_quarter = st.selectbox("Chọn Quý báo cáo", options=[1, 2, 3, 4], index=1)
+    uploaded_file = st.file_uploader("📂 Tải lên file Excel dữ liệu thô", type=["xlsx", "xls"])
+
+if uploaded_file is not None:
+    st.success(f"✅ Đã tải lên thành công file: {uploaded_file.name}")
+    df_raw = pd.read_excel(uploaded_file)
+    st.dataframe(df_raw.head())
+
+    if st.button("🚀 Tạo 7 Báo cáo & Xuất Excel"):
+        with st.spinner("⏳ Đang xử lý dữ liệu và tạo các báo cáo..."):
+            excel_data = generate_all_reports_to_excel(df_raw, input_year, input_quarter)
+            
+            st.success("🎉 Đã tạo xong file Excel chứa 7 báo cáo!")
+            st.download_button(
+                label="📥 Tải xuống File Excel Tổng hợp",
+                data=excel_data,
+                file_name=f"Tong_hop_Bao_cao_KPCS_Q{input_quarter}_{input_year}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+else:
+    st.info("Vui lòng tải lên file Excel dữ liệu thô để bắt đầu.")
