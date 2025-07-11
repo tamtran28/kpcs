@@ -15,10 +15,17 @@ def calculate_summary_metrics(dataframe, groupby_cols, year_start_date, quarter_
         if not cols: return len(data_filtered)
         else: return data_filtered.groupby(cols).size()
 
-    ton_dau_nam = agg(dataframe[(dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] < year_start_date) & ((dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'].isnull()) | (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= year_start_date))], groupby_cols)
-    phat_sinh_nam = dataframe[
-    dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] >= year_start_date
-].groupby(groupby_cols).size()
+        # SỬA ĐỔI: Thêm điều kiện chặn trên <= year_end_date
+    phat_sinh_nam = agg(dataframe[
+        (dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] >= year_start_date) &
+        (dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] <= year_end_date)
+    ], groupby_cols)
+
+    # SỬA ĐỔI: Thêm điều kiện chặn trên <= year_end_date
+    khac_phuc_nam = agg(dataframe[
+        (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= year_start_date) &
+        (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] <= year_end_date)
+    ], groupby_cols)
 
 # Đếm số lượng đã khắc phục từ đầu năm đến nay
 khac_phuc_nam = dataframe[
