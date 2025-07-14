@@ -459,10 +459,10 @@ def create_hierarchical_table(dataframe, parent_col, child_col, dates):
     summary_cols_template = ['Tồn đầu năm', 'Phát sinh năm', 'Khắc phục năm', 'Tồn đầu quý', 'Phát sinh quý', 'Khắc phục quý', 'Tồn cuối quý', 'Kiến nghị chưa khắc phục', 'Quá hạn khắc phục', 'Trong đó quá hạn trên 1 năm', 'Tỷ lệ chưa KP đến cuối Quý']
     cols_order = ['Tên Đơn vị'] + summary_cols_template
 
-    summary = calculate_summary_metrics(dataframe, [child_col], **dates)
-    if summary.empty:
+    if dataframe.empty or parent_col not in dataframe.columns or child_col not in dataframe.columns:
         return pd.DataFrame(columns=cols_order)
 
+    summary = calculate_summary_metrics(dataframe, [child_col], **dates)
     parent_mapping = dataframe[[child_col, parent_col]].drop_duplicates().set_index(child_col)
     summary_with_parent = summary.join(parent_mapping)
     parent_summary = calculate_summary_metrics(dataframe, [parent_col], **dates)
@@ -493,7 +493,6 @@ def create_hierarchical_table(dataframe, parent_col, child_col, dates):
 
     return full_report_df.reindex(columns=cols_order)
 
-
 # ==============================================================================
 # PHẦN 3: GIAO DIỆN VÀ LUỒNG THỰC THI CỦA STREAMLIT
 # ==============================================================================
@@ -507,7 +506,6 @@ with st.sidebar:
 if uploaded_file is not None:
     st.success(f"✅ Đã tải lên thành công file: **{uploaded_file.name}**")
     
-    # Sử dụng cache để không phải load lại file mỗi lần tương tác
     @st.cache_data
     def load_data(file):
         df = pd.read_excel(file)
@@ -536,7 +534,6 @@ if uploaded_file is not None:
             PARENT_COL = 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)'
             CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
 
-            # --- TẠO CÁC BẢNG BÁO CÁO ---
             df1 = create_summary_table(df, 'Nhom_Don_Vi', dates)
             df2 = create_summary_table(df_hoiso, PARENT_COL, dates)
             df3 = create_top_n_table(df_hoiso, 5, dates)
@@ -545,27 +542,21 @@ if uploaded_file is not None:
             df6 = create_top_n_table(df_dvdk_amc, 10, dates)
             df7 = create_hierarchical_table(df_dvdk_amc, PARENT_COL, CHILD_COL, dates)
 
-            # --- GHI RA FILE EXCEL TRONG BỘ NHỚ VÀ THÊM KẺ KHUNG ---
             output_stream = BytesIO()
             with pd.ExcelWriter(output_stream, engine='xlsxwriter') as writer:
                 workbook = writer.book
-                border_format = workbook.add_format({'border': 1, 'valign': 'vcenter'}) # Thêm căn giữa theo chiều dọc
+                border_format = workbook.add_format({'border': 1, 'valign': 'vcenter'})
                 
-                # Hàm phụ để ghi và định dạng
                 def write_to_sheet(df_to_write, sheet_name, index=True):
                     df_to_write.to_excel(writer, sheet_name=sheet_name, index=index)
                     worksheet = writer.sheets[sheet_name]
-                    # Lấy kích thước để áp dụng định dạng
                     num_rows, num_cols = df_to_write.shape
-                    # Áp dụng cho cả header và dữ liệu
-                    worksheet.conditional_format(0, 0, num_rows, num_cols + (1 if index else 0) - 1, 
-                                                 {'type': 'no_blanks', 'format': border_format})
-                    # Tự động điều chỉnh độ rộng cột
+                    worksheet.conditional_format(0, 0, num_rows, num_cols + (1 if index else 0) - 1, {'type': 'no_blanks', 'format': border_format})
                     for idx, col in enumerate(df_to_write.columns):
                         series = df_to_write[col]
                         max_len = max((series.astype(str).map(len).max(), len(str(series.name)))) + 2
                         worksheet.set_column(idx + (1 if index else 0), idx + (1 if index else 0), max_len)
-                    if index: # Tự động điều chỉnh cột index
+                    if index:
                         max_len_idx = max(df_to_write.index.astype(str).map(len).max(), len(str(df_to_write.index.name))) + 2
                         worksheet.set_column(0, 0, max_len_idx)
 
