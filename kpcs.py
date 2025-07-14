@@ -390,10 +390,6 @@ st.title("📊 Hệ thống Báo cáo Tình hình KPCS Tự động")
 # ==============================================================================
 
 def calculate_summary_metrics(dataframe, groupby_cols, year_start_date, quarter_start_date, quarter_end_date):
-    """
-    Hàm tính toán tất cả các chỉ số. Đây là hàm thuần khiết, không phụ thuộc vào
-    biến toàn cục, đảm bảo tính chính xác và dễ kiểm thử.
-    """
     if not isinstance(groupby_cols, list):
         raise TypeError("groupby_cols phải là một danh sách (list)")
 
@@ -404,7 +400,6 @@ def calculate_summary_metrics(dataframe, groupby_cols, year_start_date, quarter_
             return len(data_filtered)
         return data_filtered.groupby(cols).size()
 
-    # --- A. TÍNH TOÁN CÁC CHỈ SỐ DÒNG CHẢY (FLOW METRICS) ---
     ton_dau_quy = agg(dataframe[(dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] < quarter_start_date) & ((dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'].isnull()) | (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= quarter_start_date))], groupby_cols)
     phat_sinh_quy = agg(dataframe[(dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] >= quarter_start_date) & (dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] <= quarter_end_date)], groupby_cols)
     khac_phuc_quy = agg(dataframe[(dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= quarter_start_date) & (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] <= quarter_end_date)], groupby_cols)
@@ -412,7 +407,6 @@ def calculate_summary_metrics(dataframe, groupby_cols, year_start_date, quarter_
     khac_phuc_nam = agg(dataframe[(dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= year_start_date) & (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] <= quarter_end_date)], groupby_cols)
     ton_dau_nam = agg(dataframe[(dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] < year_start_date) & ((dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'].isnull()) | (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= year_start_date))], groupby_cols)
 
-    # --- B. TỔNG HỢP VÀ TÍNH TOÁN CÁC CHỈ SỐ TRẠNG THÁI (STATE METRICS) ---
     if not groupby_cols:
         summary = pd.DataFrame({'Tồn đầu quý': [ton_dau_quy], 'Phát sinh quý': [phat_sinh_quy], 'Khắc phục quý': [khac_phuc_quy], 'Tồn đầu năm': [ton_dau_nam], 'Phát sinh năm': [phat_sinh_nam], 'Khắc phục năm': [khac_phuc_nam]})
     else:
@@ -461,8 +455,13 @@ def create_top_n_table(dataframe, n, dates):
     return pd.concat([top_n, total_row])
 
 def create_hierarchical_table(dataframe, parent_col, child_col, dates):
+    """Bảng phân cấp, bỏ cột 'Phân cấp', dùng thụt lề và có dòng Grand Total (ĐÃ SỬA LỖI)."""
+    summary_cols_template = ['Tồn đầu năm', 'Phát sinh năm', 'Khắc phục năm', 'Tồn đầu quý', 'Phát sinh quý', 'Khắc phục quý', 'Tồn cuối quý', 'Kiến nghị chưa khắc phục', 'Quá hạn khắc phục', 'Trong đó quá hạn trên 1 năm', 'Tỷ lệ chưa KP đến cuối Quý']
+    cols_order = ['Tên Đơn vị'] + summary_cols_template
+
     summary = calculate_summary_metrics(dataframe, [child_col], **dates)
-    if summary.empty: return pd.DataFrame(columns=['Tên Đơn vị'] + summary.columns.tolist())
+    if summary.empty:
+        return pd.DataFrame(columns=cols_order)
 
     parent_mapping = dataframe[[child_col, parent_col]].drop_duplicates().set_index(child_col)
     summary_with_parent = summary.join(parent_mapping)
@@ -473,24 +472,26 @@ def create_hierarchical_table(dataframe, parent_col, child_col, dates):
 
     for parent_name in unique_parents:
         if parent_name not in parent_summary.index: continue
+        
         parent_row = parent_summary.loc[[parent_name]].reset_index().rename(columns={parent_col: 'Tên Đơn vị'})
         parent_row['Tên Đơn vị'] = f"**{parent_name}**"
         final_report_rows.append(parent_row)
+        
         children_df = summary_with_parent[summary_with_parent[parent_col] == parent_name].reset_index().rename(columns={child_col: 'Tên Đơn vị'})
         children_df['Tên Đơn vị'] = "  •  " + children_df['Tên Đơn vị'].astype(str)
         final_report_rows.append(children_df)
     
-    if not final_report_rows: return pd.DataFrame(columns=['Tên Đơn vị'] + summary.columns.tolist())
+    if not final_report_rows:
+        return pd.DataFrame(columns=cols_order)
     
     full_report_df = pd.concat(final_report_rows, ignore_index=True)
     
-    grand_total = calculate_summary_metrics(dataframe, [], **dates)
-    grand_total_row = pd.DataFrame(grand_total).T.reset_index(drop=True)
+    # SỬA LỖI LOGIC TẠO DÒNG TỔNG CỘNG
+    grand_total_row = calculate_summary_metrics(dataframe, [], **dates)
     grand_total_row['Tên Đơn vị'] = '**TỔNG CỘNG TOÀN BỘ**'
     full_report_df = pd.concat([full_report_df, grand_total_row], ignore_index=True)
 
-    cols = ['Tên Đơn vị'] + [col for col in summary.columns if col != 'Tên Đơn vị']
-    return full_report_df.reindex(columns=cols)
+    return full_report_df.reindex(columns=cols_order)
 
 
 # ==============================================================================
@@ -506,6 +507,7 @@ with st.sidebar:
 if uploaded_file is not None:
     st.success(f"✅ Đã tải lên thành công file: **{uploaded_file.name}**")
     
+    # Sử dụng cache để không phải load lại file mỗi lần tương tác
     @st.cache_data
     def load_data(file):
         df = pd.read_excel(file)
@@ -521,7 +523,7 @@ if uploaded_file is not None:
 
     if st.button("🚀 Tạo Báo cáo & Xuất Excel"):
         with st.spinner("⏳ Đang xử lý dữ liệu và tạo các báo cáo... Vui lòng chờ trong giây lát."):
-            df = df_raw.copy()
+            df = df_raw.copy() 
             dates = {'year_start_date': pd.to_datetime(f'{input_year}-01-01'), 'quarter_start_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01'), 'quarter_end_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01') + pd.offsets.QuarterEnd(0)}
 
             for col in ['Đơn vị thực hiện KPCS trong quý', 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)']:
@@ -547,15 +549,26 @@ if uploaded_file is not None:
             output_stream = BytesIO()
             with pd.ExcelWriter(output_stream, engine='xlsxwriter') as writer:
                 workbook = writer.book
-                border_format = workbook.add_format({'border': 1})
-
+                border_format = workbook.add_format({'border': 1, 'valign': 'vcenter'}) # Thêm căn giữa theo chiều dọc
+                
+                # Hàm phụ để ghi và định dạng
                 def write_to_sheet(df_to_write, sheet_name, index=True):
                     df_to_write.to_excel(writer, sheet_name=sheet_name, index=index)
                     worksheet = writer.sheets[sheet_name]
-                    # Áp dụng định dạng cho vùng dữ liệu
-                    worksheet.conditional_format(0, 0, len(df_to_write), len(df_to_write.columns) + (1 if index else 0) - 1, 
+                    # Lấy kích thước để áp dụng định dạng
+                    num_rows, num_cols = df_to_write.shape
+                    # Áp dụng cho cả header và dữ liệu
+                    worksheet.conditional_format(0, 0, num_rows, num_cols + (1 if index else 0) - 1, 
                                                  {'type': 'no_blanks', 'format': border_format})
-                
+                    # Tự động điều chỉnh độ rộng cột
+                    for idx, col in enumerate(df_to_write.columns):
+                        series = df_to_write[col]
+                        max_len = max((series.astype(str).map(len).max(), len(str(series.name)))) + 2
+                        worksheet.set_column(idx + (1 if index else 0), idx + (1 if index else 0), max_len)
+                    if index: # Tự động điều chỉnh cột index
+                        max_len_idx = max(df_to_write.index.astype(str).map(len).max(), len(str(df_to_write.index.name))) + 2
+                        worksheet.set_column(0, 0, max_len_idx)
+
                 write_to_sheet(df1, "1_TH_ToanHang", index=True)
                 write_to_sheet(df2, "2_TH_HoiSo", index=True)
                 write_to_sheet(df3, "3_Top5_HoiSo", index=True)
