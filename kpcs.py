@@ -280,13 +280,10 @@ def create_summary_table(dataframe, groupby_col, dates):
 def create_top_n_table(dataframe, n, dates):
     """SỬA ĐỔI: Bảng Top N, có dòng tổng cộng của toàn bộ nhóm."""
     CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
-    # Tính summary cho toàn bộ dataframe trước
     full_summary = calculate_summary_metrics(dataframe, [CHILD_COL], **dates)
     
-    # Lấy Top N
     top_n = full_summary.sort_values(by='Quá hạn khắc phục', ascending=False).head(n)
     
-    # Tạo dòng tổng cộng từ full_summary (tổng của tất cả, không chỉ Top N)
     total_row = pd.DataFrame(full_summary.sum(numeric_only=True)).T
     total_row.index = ['TỔNG CỘNG CỦA NHÓM']
     total_denom = total_row.at['TỔNG CỘNG CỦA NHÓM', 'Tồn đầu quý'] + total_row.at['TỔNG CỘNG CỦA NHÓM', 'Phát sinh quý']
@@ -321,7 +318,6 @@ def create_hierarchical_table(dataframe, parent_col, child_col, dates):
     
     if not final_report_rows: return pd.DataFrame()
     
-    # Ghép tất cả lại
     full_report_df = pd.concat(final_report_rows, ignore_index=True)
     
     # Thêm dòng Grand Total
@@ -329,7 +325,7 @@ def create_hierarchical_table(dataframe, parent_col, child_col, dates):
     grand_total_row = pd.DataFrame(grand_total, index=['**TỔNG CỘNG TOÀN BỘ**']).reset_index().rename(columns={'index': 'Tên Đơn vị'})
     full_report_df = pd.concat([full_report_df, grand_total_row], ignore_index=True)
 
-    # Sắp xếp lại cột cho đẹp
+    # Đặt cột 'Tên Đơn vị' lên đầu tiên
     cols = ['Tên Đơn vị'] + [col for col in summary.columns if col != 'Tên Đơn vị']
     return full_report_df[cols]
 
@@ -361,7 +357,7 @@ if uploaded_file is not None:
 
     if st.button("🚀 Tạo Báo cáo & Xuất Excel"):
         with st.spinner("⏳ Đang xử lý dữ liệu và tạo các báo cáo... Vui lòng chờ trong giây lát."):
-            df = df_raw.copy() # Làm việc trên bản copy để tránh thay đổi dữ liệu cache
+            df = df_raw.copy() 
             dates = {
                 'year_start_date': pd.to_datetime(f'{input_year}-01-01'),
                 'quarter_start_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01'),
