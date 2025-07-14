@@ -222,7 +222,7 @@ st.set_page_config(layout="wide", page_title="Hệ thống Báo cáo KPCS Tự �
 st.title("📊 Hệ thống Báo cáo Tình hình KPCS Tự động")
 
 # ==============================================================================
-# PHẦN 1: CÁC HÀM LOGIC CỐT LÕI (Không thay đổi)
+# PHẦN 1: CÁC HÀM LOGIC CỐT LÕI (ĐÃ SỬA LỖI VALUEERROR)
 # ==============================================================================
 
 def calculate_summary_metrics(dataframe, groupby_cols, year_start_date, quarter_start_date, quarter_end_date):
@@ -243,7 +243,18 @@ def calculate_summary_metrics(dataframe, groupby_cols, year_start_date, quarter_
     khac_phuc_nam = agg(dataframe[(dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= year_start_date) & (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] <= quarter_end_date)], groupby_cols)
     ton_dau_nam = agg(dataframe[(dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] < year_start_date) & ((dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'].isnull()) | (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] >= year_start_date))], groupby_cols)
 
-    summary = pd.DataFrame({'Tồn đầu quý': ton_dau_quy, 'Phát sinh quý': phat_sinh_quy, 'Khắc phục quý': khac_phuc_quy, 'Tồn đầu năm': ton_dau_nam, 'Phát sinh năm': phat_sinh_nam, 'Khắc phục năm': khac_phuc_nam}).fillna(0).astype(int)
+    # SỬA LỖI: Xử lý riêng trường hợp tính tổng (groupby_cols rỗng)
+    if not groupby_cols:
+        summary = pd.DataFrame({
+            'Tồn đầu quý': [ton_dau_quy], 'Phát sinh quý': [phat_sinh_quy], 'Khắc phục quý': [khac_phuc_quy],
+            'Tồn đầu năm': [ton_dau_nam], 'Phát sinh năm': [phat_sinh_nam], 'Khắc phục năm': [khac_phuc_nam],
+        })
+    else:
+        summary = pd.DataFrame({
+            'Tồn đầu quý': ton_dau_quy, 'Phát sinh quý': phat_sinh_quy, 'Khắc phục quý': khac_phuc_quy,
+            'Tồn đầu năm': ton_dau_nam, 'Phát sinh năm': phat_sinh_nam, 'Khắc phục năm': khac_phuc_nam,
+        }).fillna(0).astype(int)
+
     summary['Tồn cuối quý'] = summary['Tồn đầu quý'] + summary['Phát sinh quý'] - summary['Khắc phục quý']
     summary['Kiến nghị chưa khắc phục'] = summary['Tồn cuối quý']
 
@@ -263,11 +274,10 @@ def calculate_summary_metrics(dataframe, groupby_cols, year_start_date, quarter_
     return summary
 
 # ==============================================================================
-# PHẦN 2: CÁC HÀM TẠO BÁO CÁO (ĐÃ CẬP NHẬT THEO YÊU CẦU MỚI)
+# PHẦN 2: CÁC HÀM TẠO BÁO CÁO (Không đổi)
 # ==============================================================================
 
 def create_summary_table(dataframe, groupby_col, dates):
-    """Bảng tóm tắt phẳng, luôn có dòng tổng cộng."""
     summary = calculate_summary_metrics(dataframe, [groupby_col], **dates)
     if not summary.empty:
         total_row = pd.DataFrame(summary.sum(numeric_only=True)).T
@@ -278,54 +288,36 @@ def create_summary_table(dataframe, groupby_col, dates):
     return summary
 
 def create_top_n_table(dataframe, n, dates):
-    """SỬA ĐỔI: Bảng Top N, có dòng tổng cộng của toàn bộ nhóm."""
     CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
     full_summary = calculate_summary_metrics(dataframe, [CHILD_COL], **dates)
-    
     top_n = full_summary.sort_values(by='Quá hạn khắc phục', ascending=False).head(n)
-    
     total_row = pd.DataFrame(full_summary.sum(numeric_only=True)).T
     total_row.index = ['TỔNG CỘNG CỦA NHÓM']
     total_denom = total_row.at['TỔNG CỘNG CỦA NHÓM', 'Tồn đầu quý'] + total_row.at['TỔNG CỘNG CỦA NHÓM', 'Phát sinh quý']
     total_row['Tỷ lệ chưa KP đến cuối Quý'] = (total_row.at['TỔNG CỘNG CỦA NHÓM', 'Tồn cuối quý'] / total_denom) if total_denom != 0 else 0
-    
     return pd.concat([top_n, total_row])
 
 def create_hierarchical_table(dataframe, parent_col, child_col, dates):
-    """SỬA ĐỔI: Bảng phân cấp, bỏ cột 'Phân cấp', dùng thụt lề và có dòng Grand Total."""
     summary = calculate_summary_metrics(dataframe, [child_col], **dates)
     if summary.empty: return pd.DataFrame()
-
     parent_mapping = dataframe[[child_col, parent_col]].drop_duplicates().set_index(child_col)
     summary_with_parent = summary.join(parent_mapping)
     parent_summary = calculate_summary_metrics(dataframe, [parent_col], **dates)
-    
     final_report_rows = []
     unique_parents = dataframe[parent_col].dropna().unique()
-
     for parent_name in unique_parents:
         if parent_name not in parent_summary.index: continue
-        
-        # Thêm dòng cha (in đậm)
         parent_row = parent_summary.loc[[parent_name]].reset_index().rename(columns={parent_col: 'Tên Đơn vị'})
         parent_row['Tên Đơn vị'] = f"**{parent_name}**"
         final_report_rows.append(parent_row)
-        
-        # Thêm các dòng con (thụt lề)
         children_df = summary_with_parent[summary_with_parent[parent_col] == parent_name].reset_index().rename(columns={child_col: 'Tên Đơn vị'})
         children_df['Tên Đơn vị'] = "  •  " + children_df['Tên Đơn vị'].astype(str)
         final_report_rows.append(children_df)
-    
     if not final_report_rows: return pd.DataFrame()
-    
     full_report_df = pd.concat(final_report_rows, ignore_index=True)
-    
-    # Thêm dòng Grand Total
     grand_total = calculate_summary_metrics(dataframe, [], **dates)
     grand_total_row = pd.DataFrame(grand_total, index=['**TỔNG CỘNG TOÀN BỘ**']).reset_index().rename(columns={'index': 'Tên Đơn vị'})
     full_report_df = pd.concat([full_report_df, grand_total_row], ignore_index=True)
-
-    # Đặt cột 'Tên Đơn vị' lên đầu tiên
     cols = ['Tên Đơn vị'] + [col for col in summary.columns if col != 'Tên Đơn vị']
     return full_report_df[cols]
 
@@ -341,7 +333,6 @@ with st.sidebar:
 
 if uploaded_file is not None:
     st.success(f"✅ Đã tải lên thành công file: **{uploaded_file.name}**")
-    
     @st.cache_data
     def load_data(file):
         df = pd.read_excel(file)
@@ -350,51 +341,32 @@ if uploaded_file is not None:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce')
         return df
-
     df_raw = load_data(uploaded_file)
     st.write("Xem trước 5 dòng dữ liệu đầu tiên:")
     st.dataframe(df_raw.head())
-
     if st.button("🚀 Tạo Báo cáo & Xuất Excel"):
         with st.spinner("⏳ Đang xử lý dữ liệu và tạo các báo cáo... Vui lòng chờ trong giây lát."):
-            df = df_raw.copy() 
-            dates = {
-                'year_start_date': pd.to_datetime(f'{input_year}-01-01'),
-                'quarter_start_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01'),
-                'quarter_end_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01') + pd.offsets.QuarterEnd(0)
-            }
-
+            df = df_raw.copy()
+            dates = {'year_start_date': pd.to_datetime(f'{input_year}-01-01'), 'quarter_start_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01'), 'quarter_end_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01') + pd.offsets.QuarterEnd(0)}
             for col in ['Đơn vị thực hiện KPCS trong quý', 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)']:
                 if col in df.columns:
                     df[col] = df[col].astype(str).str.strip().replace('nan', '')
-
             df['Nhom_Don_Vi'] = np.where(df['ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)'] == 'Hội sở', 'Hội sở', 'ĐVKD, AMC')
             df_hoiso = df[df['Nhom_Don_Vi'] == 'Hội sở'].copy()
             df_dvdk_amc = df[df['Nhom_Don_Vi'] == 'ĐVKD, AMC'].copy()
             PARENT_COL = 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)'
             CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
-
             output_stream = BytesIO()
             with pd.ExcelWriter(output_stream, engine='xlsxwriter') as writer:
-                # Bảng 1
                 create_summary_table(df, 'Nhom_Don_Vi', dates).to_excel(writer, sheet_name="1_TH_ToanHang")
-                # Bảng 2
                 create_summary_table(df_hoiso, PARENT_COL, dates).to_excel(writer, sheet_name="2_TH_HoiSo")
-                # Bảng 3
                 create_top_n_table(df_hoiso, 5, dates).to_excel(writer, sheet_name="3_Top5_HoiSo")
-                # Bảng 4
                 create_hierarchical_table(df_hoiso, PARENT_COL, CHILD_COL, dates).to_excel(writer, sheet_name="4_PhanCap_HoiSo", index=False)
-                # Bảng 5
                 create_summary_table(df_dvdk_amc, PARENT_COL, dates).to_excel(writer, sheet_name="5_TH_DVDK_KhuVuc")
-                # Bảng 6
                 create_top_n_table(df_dvdk_amc, 10, dates).to_excel(writer, sheet_name="6_Top10_DVDK")
-                # Bảng 7
                 create_hierarchical_table(df_dvdk_amc, PARENT_COL, CHILD_COL, dates).to_excel(writer, sheet_name="7_ChiTiet_DVDK", index=False)
-            
             excel_data = output_stream.getvalue()
-
         st.success("🎉 Đã tạo xong file Excel chứa 7 báo cáo!")
-        
         st.download_button(
             label="📥 Tải xuống File Excel Tổng hợp",
             data=excel_data,
