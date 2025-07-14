@@ -413,7 +413,9 @@ def calculate_summary_metrics(dataframe, groupby_cols, year_start_date, quarter_
         summary = pd.DataFrame({'Tồn đầu quý': ton_dau_quy, 'Phát sinh quý': phat_sinh_quy, 'Khắc phục quý': khac_phuc_quy, 'Tồn đầu năm': ton_dau_nam, 'Phát sinh năm': phat_sinh_nam, 'Khắc phục năm': khac_phuc_nam}).fillna(0).astype(int)
 
     summary['Tồn cuối quý'] = summary['Tồn đầu quý'] + summary['Phát sinh quý'] - summary['Khắc phục quý']
-    summary['Kiến nghị chưa khắc phục'] = summary['Tồn cuối quý']
+    
+    # SỬA ĐỔI: Dòng tạo cột 'Kiến nghị chưa khắc phục' đã được xóa bỏ
+    # summary['Kiến nghị chưa khắc phục'] = summary['Tồn cuối quý']
 
     df_actually_outstanding = dataframe[(dataframe['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] <= quarter_end_date) & ((dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'].isnull()) | (dataframe['NGÀY HOÀN TẤT KPCS (mm/dd/yyyy)'] > quarter_end_date))]
     qua_han_khac_phuc = agg(df_actually_outstanding[df_actually_outstanding['Thời hạn hoàn thành (mm/dd/yyyy)'] < quarter_end_date], groupby_cols)
@@ -426,7 +428,12 @@ def calculate_summary_metrics(dataframe, groupby_cols, year_start_date, quarter_
     denominator = summary['Tồn đầu quý'] + summary['Phát sinh quý']
     summary['Tỷ lệ chưa KP đến cuối Quý'] = (summary['Tồn cuối quý'] / denominator).replace([np.inf, -np.inf], 0).fillna(0)
     
-    final_cols_order = ['Tồn đầu năm', 'Phát sinh năm', 'Khắc phục năm', 'Tồn đầu quý', 'Phát sinh quý', 'Khắc phục quý', 'Tồn cuối quý', 'Kiến nghị chưa khắc phục', 'Quá hạn khắc phục', 'Trong đó quá hạn trên 1 năm', 'Tỷ lệ chưa KP đến cuối Quý']
+    # SỬA ĐỔI: Cập nhật lại thứ tự cột sau khi đã xóa
+    final_cols_order = [
+        'Tồn đầu năm', 'Phát sinh năm', 'Khắc phục năm', 
+        'Tồn đầu quý', 'Phát sinh quý', 'Khắc phục quý', 'Tồn cuối quý', 
+        'Quá hạn khắc phục', 'Trong đó quá hạn trên 1 năm', 'Tỷ lệ chưa KP đến cuối Quý'
+    ]
     summary = summary.reindex(columns=final_cols_order, fill_value=0)
     return summary
 
@@ -455,8 +462,8 @@ def create_top_n_table(dataframe, n, dates):
     return pd.concat([top_n, total_row])
 
 def create_hierarchical_table(dataframe, parent_col, child_col, dates):
-    """Bảng phân cấp, bỏ cột 'Phân cấp', dùng thụt lề và có dòng Grand Total (ĐÃ SỬA LỖI)."""
-    summary_cols_template = ['Tồn đầu năm', 'Phát sinh năm', 'Khắc phục năm', 'Tồn đầu quý', 'Phát sinh quý', 'Khắc phục quý', 'Tồn cuối quý', 'Kiến nghị chưa khắc phục', 'Quá hạn khắc phục', 'Trong đó quá hạn trên 1 năm', 'Tỷ lệ chưa KP đến cuối Quý']
+    # SỬA ĐỔI: Cập nhật lại danh sách cột mẫu
+    summary_cols_template = ['Tồn đầu năm', 'Phát sinh năm', 'Khắc phục năm', 'Tồn đầu quý', 'Phát sinh quý', 'Khắc phục quý', 'Tồn cuối quý', 'Quá hạn khắc phục', 'Trong đó quá hạn trên 1 năm', 'Tỷ lệ chưa KP đến cuối Quý']
     cols_order = ['Tên Đơn vị'] + summary_cols_template
 
     if dataframe.empty or parent_col not in dataframe.columns or child_col not in dataframe.columns:
@@ -486,7 +493,6 @@ def create_hierarchical_table(dataframe, parent_col, child_col, dates):
     
     full_report_df = pd.concat(final_report_rows, ignore_index=True)
     
-    # SỬA LỖI LOGIC TẠO DÒNG TỔNG CỘNG
     grand_total_row = calculate_summary_metrics(dataframe, [], **dates)
     grand_total_row['Tên Đơn vị'] = '**TỔNG CỘNG TOÀN BỘ**'
     full_report_df = pd.concat([full_report_df, grand_total_row], ignore_index=True)
