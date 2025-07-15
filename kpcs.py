@@ -699,9 +699,27 @@ def create_hierarchical_table_7_reports(dataframe, parent_col, child_col, dates)
 
 def calculate_kqkt_metrics(df_group, group_by_col=None):
     if df_group.empty: return pd.DataFrame()
-    RISK_COL = 'Xếp hạng rủi ro  (Nhập theo định nghĩa ở Sheet DANHMUC)'
+    
+    # SỬA ĐỔI: Thay đổi tên cột cứng nhắc để khớp với tên cột phổ biến trong Excel
+    RISK_COL = 'Xếp hạng rủi ro'
     ISSUE_DATE_COL = 'Ngày, tháng, năm ban hành (mm/dd/yyyy)'
     FIXED_COL = 'Đã khắc phục (Nếu đã khắc phục trong thời gian kiểm toán thì đánh dấu X)'
+
+    # Kiểm tra xem các cột cần thiết có tồn tại không
+    required_cols = [RISK_COL, ISSUE_DATE_COL, FIXED_COL]
+    for col in required_cols:
+        if col not in df_group.columns:
+            # Tìm cột tương tự, ví dụ: 'Xếp hạng rủi ro ' có khoảng trắng thừa
+            similar_cols = [c for c in df_group.columns if col in c]
+            if similar_cols:
+                st.warning(f"Không tìm thấy cột '{col}'. Sử dụng cột gần giống: '{similar_cols[0]}'")
+                if col == RISK_COL: RISK_COL = similar_cols[0]
+                if col == ISSUE_DATE_COL: ISSUE_DATE_COL = similar_cols[0]
+                if col == FIXED_COL: FIXED_COL = similar_cols[0]
+            else:
+                st.error(f"Lỗi nghiêm trọng: Không tìm thấy cột '{col}' trong dữ liệu. Vui lòng kiểm tra lại file Excel.")
+                return pd.DataFrame()
+
 
     if group_by_col is None:
         summary = pd.DataFrame([{'Tổng kiến nghị': len(df_group), 'Đã khắc phục': (df_group[FIXED_COL] == 'X').sum()}])
@@ -796,7 +814,6 @@ if uploaded_file is not None:
     st.write("Xem trước 5 dòng dữ liệu đầu tiên:")
     st.dataframe(df_raw.head())
 
-    # SỬA ĐỔI: TẠO 2 CỘT CHO 2 NÚT BẤM
     col1, col2 = st.columns(2)
 
     with col1:
@@ -851,23 +868,21 @@ if uploaded_file is not None:
         if st.button("📊 Tạo Báo cáo KQ Kiểm toán quý"):
             with st.spinner("⏳ Đang xử lý và tạo báo cáo KQKT..."):
                 df = df_raw.copy()
-                # Chạy hàm tạo báo cáo KQKT
+                # Thêm vào để đổi tên cột cho logic mới
+                df.rename(columns={'Xếp hạng rủi ro': 'Xếp hạng rủi ro  (Nhập theo định nghĩa ở Sheet DANHMUC)', 'Đã khắc phục': 'Đã khắc phục (Nếu đã khắc phục trong thời gian kiểm toán thì đánh dấu X)'}, inplace=True, errors='ignore')
+                
                 kqkt_df = generate_kqkt_report(df, year=input_year, quarter=input_quarter)
                 
                 output_stream_kqkt = BytesIO()
                 with pd.ExcelWriter(output_stream_kqkt, engine='xlsxwriter') as writer:
                     workbook = writer.book
                     border_format = workbook.add_format({'border': 1, 'valign': 'vcenter'})
-                    # Định dạng tiêu đề chính
                     header_format = workbook.add_format({'bold': True, 'font_size': 16, 'align': 'center', 'valign': 'vcenter'})
-                    # Viết tiêu đề
                     worksheet = writer.book.add_worksheet("KQ_KiemToan_Quy")
                     writer.sheets["KQ_KiemToan_Quy"] = worksheet
                     worksheet.merge_range('A1:J1', 'KẾT QUẢ KIỂM TOÁN TRONG QUÝ', header_format)
                     
-                    # Ghi DataFrame xuống, bắt đầu từ dòng 3 (để có khoảng trống)
                     kqkt_df.to_excel(writer, sheet_name="KQ_KiemToan_Quy", startrow=2, index=False)
-                    # Thêm kẻ khung và tự động điều chỉnh độ rộng
                     worksheet = writer.sheets["KQ_KiemToan_Quy"]
                     num_rows, num_cols = kqkt_df.shape
                     worksheet.conditional_format(2, 0, 2 + num_rows, num_cols - 1, {'type': 'no_blanks', 'format': border_format})
