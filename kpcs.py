@@ -8,7 +8,7 @@ st.set_page_config(layout="wide", page_title="Hệ thống Báo cáo KPCS Tự �
 st.title("📊 Hệ thống Báo cáo Tự động")
 
 # ==============================================================================
-# PHẦN 1: CÁC HÀM LOGIC (Bao gồm cả hai chức năng)
+# PHẦN 1: CÁC HÀM LOGIC (Bao gồm tất cả các chức năng)
 # ==============================================================================
 
 # --- Các hàm cho chức năng "TẠO 7 BÁO CÁO (TỔNG HỢP)" ---
@@ -56,8 +56,28 @@ def create_summary_table(dataframe, groupby_col, dates):
         summary = pd.concat([summary, total_row])
     return summary
 
+# SỬA LỖI: Thêm lại hàm create_top_n_table đã bị thiếu
+def create_top_n_table(dataframe, n, dates):
+    """Tạo báo cáo Top N dựa trên cột 'Đơn vị thực hiện KPCS trong quý'."""
+    CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
+    # Kiểm tra xem cột có tồn tại không
+    if CHILD_COL not in dataframe.columns:
+        st.error(f"Lỗi: Không tìm thấy cột '{CHILD_COL}' để tạo báo cáo Top {n}.")
+        return pd.DataFrame()
+
+    full_summary = calculate_summary_metrics(dataframe, [CHILD_COL], **dates)
+    top_n = full_summary.sort_values(by='Quá hạn khắc phục', ascending=False).head(n)
+    
+    # Tính tổng trên toàn bộ nhóm (không chỉ Top N)
+    total_row = pd.DataFrame(full_summary.sum(numeric_only=True)).T
+    total_row.index = ['TỔNG CỘNG CỦA NHÓM']
+    total_denom = total_row.at['TỔNG CỘNG CỦA NHÓM', 'Tồn đầu quý'] + total_row.at['TỔNG CỘNG CỦA NHÓM', 'Phát sinh quý']
+    total_row['Tỷ lệ chưa KP đến cuối Quý'] = (total_row.at['TỔNG CỘNG CỦA NHÓM', 'Tồn cuối quý'] / total_denom) if total_denom != 0 else 0
+    
+    return pd.concat([top_n, total_row])
+
+
 def create_hierarchical_table_7_reports(dataframe, parent_col, child_col, dates):
-    # This function is used by the 7-reports bundle
     summary_cols_template = ['Tồn đầu năm', 'Phát sinh năm', 'Khắc phục năm', 'Tồn đầu quý', 'Phát sinh quý', 'Khắc phục quý', 'Tồn cuối quý', 'Quá hạn khắc phục', 'Trong đó quá hạn trên 1 năm', 'Tỷ lệ chưa KP đến cuối Quý']
     cols_order = ['Tên Đơn vị'] + summary_cols_template
     if dataframe.empty or parent_col not in dataframe.columns or child_col not in dataframe.columns:
@@ -84,21 +104,17 @@ def create_hierarchical_table_7_reports(dataframe, parent_col, child_col, dates)
     return full_report_df.reindex(columns=cols_order)
 
 
-# --- Các hàm cho chức năng "KẾT QUẢ KIỂM TOÁN QUÝ" (MỚI THÊM) ---
+# --- Các hàm cho chức năng "KẾT QUẢ KIỂM TOÁN QUÝ" ---
 
 def calculate_kqkt_metrics(df_group, group_by_col=None):
     if df_group.empty: return pd.DataFrame()
     RISK_COL = 'Xếp hạng rủi ro'
     ISSUE_DATE_COL = 'Ngày, tháng, năm ban hành (mm/dd/yyyy)'
     FIXED_COL = 'Đã khắc phục (Nếu đã khắc phục trong thời gian kiểm toán thì đánh dấu X)'
-
-    # Kiểm tra và sửa tên cột nếu cần
     if RISK_COL not in df_group.columns:
-        # Tìm cột có tên gần giống
         similar_col = next((c for c in df_group.columns if 'Xếp hạng rủi ro' in c), None)
         if similar_col: RISK_COL = similar_col
         else: st.error(f"Lỗi: Không tìm thấy cột '{RISK_COL}'."); return pd.DataFrame()
-            
     if group_by_col is None:
         summary = pd.DataFrame([{'Tổng kiến nghị': len(df_group), 'Đã khắc phục': (df_group[FIXED_COL] == 'X').sum()}])
     else:
@@ -106,10 +122,8 @@ def calculate_kqkt_metrics(df_group, group_by_col=None):
             **{'Thời gian phát hành báo cáo': (ISSUE_DATE_COL, 'first'),
                'Tổng kiến nghị': (group_by_col, 'size'),
                'Đã khắc phục': (FIXED_COL, lambda x: (x == 'X').sum())})
-    
     if group_by_col: risk_breakdown = pd.crosstab(df_group[group_by_col], df_group[RISK_COL])
     else: risk_breakdown = df_group[RISK_COL].value_counts().to_frame().T.reset_index(drop=True)
-
     summary = summary.join(risk_breakdown, how='left')
     summary['Kiến nghị còn lại phải khắc phục'] = summary['Tổng kiến nghị'] - summary['Đã khắc phục']
     expected_risk_cols = ['Rất cao', 'Cao', 'Trung bình', 'Thấp']
@@ -144,7 +158,6 @@ def generate_kqkt_report(df, year, quarter):
     grand_total_row = calculate_kqkt_metrics(df_quarter, group_by_col=None)
     grand_total_row['Tên Đoàn kiểm toán'] = 'TỔNG CỘNG (I+II+III)'
     result_df = pd.concat([result_df, grand_total_row], ignore_index=True)
-    
     final_cols_order = ['Tên Đoàn kiểm toán', 'Thời gian phát hành báo cáo', 'Tổng kiến nghị', 'Rất cao', 'Cao', 'Trung bình', 'Thấp', 'Đã khắc phục', 'Kiến nghị còn lại phải khắc phục']
     result_df = result_df.reindex(columns=final_cols_order).fillna('')
     date_col_name = 'Thời gian phát hành báo cáo'
@@ -182,7 +195,6 @@ if uploaded_file is not None:
     # --- Chuẩn bị dữ liệu chung sau khi tải lên ---
     df = df_raw.copy()
     dates = {'year_start_date': pd.to_datetime(f'{input_year}-01-01'), 'quarter_start_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01'), 'quarter_end_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01') + pd.offsets.QuarterEnd(0)}
-    
     for col in ['Đơn vị thực hiện KPCS trong quý', 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)', 'Đoàn KT/GSTX']:
         if col in df.columns: df[col] = df[col].astype(str).str.strip().replace('nan', '')
 
@@ -200,14 +212,12 @@ if uploaded_file is not None:
             with st.spinner("⏳ Đang xử lý và tạo 7 báo cáo..."):
                 df1 = create_summary_table(df, 'Nhom_Don_Vi', dates)
                 df2 = create_summary_table(df_hoiso, PARENT_COL, dates)
-                
-                # SỬA ĐỔI: Thay đổi logic cho df3 để tạo Top 5 theo đơn vị cấp Cha
+                # Sửa đổi logic df3
                 summary_hoiso_by_parent = calculate_summary_metrics(df_hoiso, [PARENT_COL], **dates)
                 df3_top5_parents = summary_hoiso_by_parent.sort_values(by='Quá hạn khắc phục', ascending=False).head(5)
                 total_hoiso_row = pd.DataFrame(summary_hoiso_by_parent.sum(numeric_only=True)).T
                 total_hoiso_row.index = ['TỔNG CỘNG HỘI SỞ']
                 df3 = pd.concat([df3_top5_parents, total_hoiso_row])
-
                 df4 = create_hierarchical_table_7_reports(df_hoiso, PARENT_COL, CHILD_COL, dates)
                 df5 = create_summary_table(df_dvdk_amc, PARENT_COL, dates)
                 df6 = create_top_n_table(df_dvdk_amc, 10, dates)
