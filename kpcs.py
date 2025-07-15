@@ -819,24 +819,51 @@ if uploaded_file is not None:
     with col1:
         if st.button("🚀 Tạo 7 Báo cáo (Tổng hợp)"):
             with st.spinner("⏳ Đang xử lý và tạo 7 báo cáo..."):
-                df = df_raw.copy()
+                # df = df_raw.copy()
+                # dates = {'year_start_date': pd.to_datetime(f'{input_year}-01-01'), 'quarter_start_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01'), 'quarter_end_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01') + pd.offsets.QuarterEnd(0)}
+                # for col in ['Đơn vị thực hiện KPCS trong quý', 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)']:
+                #     if col in df.columns: df[col] = df[col].astype(str).str.strip().replace('nan', '')
+                # df['Nhom_Don_Vi'] = np.where(df['ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)'] == 'Hội sở', 'Hội sở', 'ĐVKD, AMC')
+                # df_hoiso = df[df['Nhom_Don_Vi'] == 'Hội sở'].copy()
+                # df_dvdk_amc = df[df['Nhom_Don_Vi'] == 'ĐVKD, AMC'].copy()
+                # PARENT_COL = 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)'
+                # CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
+
+                # df1 = create_summary_table(df, 'Nhom_Don_Vi', dates)
+                # df2 = create_summary_table(df_hoiso, PARENT_COL, dates)
+                # df3 = create_top_n_table(df_hoiso, 5, dates)
+                # df4 = create_hierarchical_table_7_reports(df_hoiso, PARENT_COL, CHILD_COL, dates)
+                # df5 = create_summary_table(df_dvdk_amc, PARENT_COL, dates)
+                # df6 = create_top_n_table(df_dvdk_amc, 10, dates)
+                # df7 = create_hierarchical_table_7_reports(df_dvdk_amc, PARENT_COL, CHILD_COL, dates)
                 dates = {'year_start_date': pd.to_datetime(f'{input_year}-01-01'), 'quarter_start_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01'), 'quarter_end_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01') + pd.offsets.QuarterEnd(0)}
-                for col in ['Đơn vị thực hiện KPCS trong quý', 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)']:
-                    if col in df.columns: df[col] = df[col].astype(str).str.strip().replace('nan', '')
-                df['Nhom_Don_Vi'] = np.where(df['ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)'] == 'Hội sở', 'Hội sở', 'ĐVKD, AMC')
-                df_hoiso = df[df['Nhom_Don_Vi'] == 'Hội sở'].copy()
-                df_dvdk_amc = df[df['Nhom_Don_Vi'] == 'ĐVKD, AMC'].copy()
-                PARENT_COL = 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)'
-                CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
 
-                df1 = create_summary_table(df, 'Nhom_Don_Vi', dates)
-                df2 = create_summary_table(df_hoiso, PARENT_COL, dates)
-                df3 = create_top_n_table(df_hoiso, 5, dates)
-                df4 = create_hierarchical_table_7_reports(df_hoiso, PARENT_COL, CHILD_COL, dates)
-                df5 = create_summary_table(df_dvdk_amc, PARENT_COL, dates)
-                df6 = create_top_n_table(df_dvdk_amc, 10, dates)
-                df7 = create_hierarchical_table_7_reports(df_dvdk_amc, PARENT_COL, CHILD_COL, dates)
+            for col in ['Đơn vị thực hiện KPCS trong quý', 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)']:
+                if col in df.columns:
+                    df[col] = df[col].astype(str).str.strip().replace('nan', '')
 
+            df['Nhom_Don_Vi'] = np.where(df['ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)'] == 'Hội sở', 'Hội sở', 'ĐVKD, AMC')
+            df_hoiso = df[df['Nhom_Don_Vi'] == 'Hội sở'].copy()
+            df_dvdk_amc = df[df['Nhom_Don_Vi'] == 'ĐVKD, AMC'].copy()
+            PARENT_COL = 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)'
+            CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
+
+            # --- TẠO CÁC BẢNG BÁO CÁO ---
+            df1 = create_summary_table(df, 'Nhom_Don_Vi', dates)
+            df2 = create_summary_table(df_hoiso, PARENT_COL, dates)
+            
+            # SỬA ĐỔI: Thay đổi logic cho df3 để tạo Top 5 theo đơn vị cấp Cha
+            summary_hoiso_by_parent = calculate_summary_metrics(df_hoiso, [PARENT_COL], **dates)
+            df3_top5_parents = summary_hoiso_by_parent.sort_values(by='Quá hạn khắc phục', ascending=False).head(5)
+            total_hoiso_row = pd.DataFrame(summary_hoiso_by_parent.sum(numeric_only=True)).T
+            total_hoiso_row.index = ['TỔNG CỘNG HỘI SỞ']
+            # Omit ratio calculation for simplicity, can be added back if needed
+            df3 = pd.concat([df3_top5_parents, total_hoiso_row])
+
+            df4 = create_hierarchical_table_7_reports(df_hoiso, PARENT_COL, CHILD_COL, dates)
+            df5 = create_summary_table(df_dvdk_amc, PARENT_COL, dates)
+            df6 = create_top_n_table(df_dvdk_amc, 10, dates)
+            df7 = create_hierarchical_table_7_reports(df_dvdk_amc, PARENT_COL, CHILD_COL, dates)
                 output_stream = BytesIO()
                 with pd.ExcelWriter(output_stream, engine='xlsxwriter') as writer:
                     workbook = writer.book
