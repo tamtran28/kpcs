@@ -109,7 +109,7 @@ def create_hierarchical_table_7_reports(dataframe, parent_col, child_col, dates)
 
 def calculate_kqkt_metrics(df_group, group_by_col=None):
     if df_group.empty: return pd.DataFrame()
-    RISK_COL = 'Xếp hạng rủi ro  (Nhập theo định nghĩa ở Sheet DANHMUC)'
+    RISK_COL = 'Xếp hạng rủi ro  (Nhập theo định nghĩa ở Sheet DANHMUC)'
     ISSUE_DATE_COL = 'Ngày, tháng, năm ban hành (mm/dd/yyyy)'
     FIXED_COL = 'Đã khắc phục (Nếu đã khắc phục trong thời gian kiểm toán thì đánh dấu X)'
 
