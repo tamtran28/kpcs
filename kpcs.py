@@ -598,9 +598,9 @@ st.set_page_config(layout="wide", page_title="Hệ thống Báo cáo KPCS Tự �
 st.title("📊 Hệ thống Báo cáo Tự động")
 
 # ==============================================================================
-# PHẦN 1: CÁC HÀM LOGIC CHO CHỨC NĂNG "TẠO 7 BÁO CÁO (TỔNG HỢP)"
+# PHẦN 1: CÁC HÀM LOGIC CỐT LÕI (Không thay đổi)
+# ... (Giữ nguyên các hàm calculate_summary_metrics, create_summary_table, etc.)
 # ==============================================================================
-
 def calculate_summary_metrics(dataframe, groupby_cols, year_start_date, quarter_start_date, quarter_end_date):
     if not isinstance(groupby_cols, list):
         raise TypeError("groupby_cols phải là một danh sách (list)")
@@ -692,102 +692,6 @@ def create_hierarchical_table_7_reports(dataframe, parent_col, child_col, dates)
     full_report_df = pd.concat([full_report_df, grand_total_row], ignore_index=True)
 
     return full_report_df.reindex(columns=cols_order)
-
-# ==============================================================================
-# PHẦN 2: CÁC HÀM LOGIC CHO CHỨC NĂNG "KẾT QUẢ KIỂM TOÁN QUÝ" (MỚI THÊM)
-# ==============================================================================
-
-def calculate_kqkt_metrics(df_group, group_by_col=None):
-    if df_group.empty: return pd.DataFrame()
-    
-    # SỬA ĐỔI: Thay đổi tên cột cứng nhắc để khớp với tên cột phổ biến trong Excel
-    RISK_COL = 'Xếp hạng rủi ro  (Nhập theo định nghĩa ở Sheet DANHMUC)'
-    ISSUE_DATE_COL = 'Ngày, tháng, năm ban hành (mm/dd/yyyy)'
-    FIXED_COL = 'Đã khắc phục (Nếu đã khắc phục trong thời gian kiểm toán thì đánh dấu X)'
-
-    # Kiểm tra xem các cột cần thiết có tồn tại không
-    required_cols = [RISK_COL, ISSUE_DATE_COL, FIXED_COL]
-    for col in required_cols:
-        if col not in df_group.columns:
-            # Tìm cột tương tự, ví dụ: 'Xếp hạng rủi ro ' có khoảng trắng thừa
-            similar_cols = [c for c in df_group.columns if col in c]
-            if similar_cols:
-                st.warning(f"Không tìm thấy cột '{col}'. Sử dụng cột gần giống: '{similar_cols[0]}'")
-                if col == RISK_COL: RISK_COL = similar_cols[0]
-                if col == ISSUE_DATE_COL: ISSUE_DATE_COL = similar_cols[0]
-                if col == FIXED_COL: FIXED_COL = similar_cols[0]
-            else:
-                st.error(f"Lỗi nghiêm trọng: Không tìm thấy cột '{col}' trong dữ liệu. Vui lòng kiểm tra lại file Excel.")
-                return pd.DataFrame()
-
-
-    if group_by_col is None:
-        summary = pd.DataFrame([{'Tổng kiến nghị': len(df_group), 'Đã khắc phục': (df_group[FIXED_COL] == 'X').sum()}])
-    else:
-        summary = df_group.groupby(group_by_col).agg(
-            **{'Thời gian phát hành báo cáo': (ISSUE_DATE_COL, 'first'),
-               'Tổng kiến nghị': (group_by_col, 'size'),
-               'Đã khắc phục': (FIXED_COL, lambda x: (x == 'X').sum())})
-    
-    if group_by_col:
-        risk_breakdown = pd.crosstab(df_group[group_by_col], df_group[RISK_COL])
-    else:
-        risk_breakdown = df_group[RISK_COL].value_counts().to_frame().T.reset_index(drop=True)
-
-    summary = summary.join(risk_breakdown, how='left')
-    summary['Kiến nghị còn lại phải khắc phục'] = summary['Tổng kiến nghị'] - summary['Đã khắc phục']
-    
-    expected_risk_cols = ['Rất cao', 'Cao', 'Trung bình', 'Thấp']
-    for col in expected_risk_cols:
-        if col not in summary.columns: summary[col] = 0
-    
-    summary = summary.fillna(0)
-    for col in summary.select_dtypes(include=np.number).columns:
-        summary[col] = summary[col].astype(int)
-        
-    return summary.reset_index()
-
-def generate_kqkt_report(df, year, quarter):
-    q_start_date = pd.to_datetime(f'{year}-{(quarter-1)*3 + 1}-01')
-    q_end_date = q_start_date + pd.offsets.QuarterEnd(0)
-    df_quarter = df[(df['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] >= q_start_date) & 
-                    (df['Ngày, tháng, năm ban hành (mm/dd/yyyy)'] <= q_end_date)].copy()
-
-    main_group_col = 'Đoàn KT/GSTX'
-    group_order_and_names = {'Đoàn KT': 'I. Đoàn kiểm toán', 'BKS': 'II. Ban Kiểm Soát', 'GSTX': 'III. Giám sát từ xa (GSTX)'}
-    report_parts = []
-    
-    for group_key, group_display_name in group_order_and_names.items():
-        df_main_group = df_quarter[df_quarter[main_group_col] == group_key]
-        if df_main_group.empty: continue
-
-        header_row = calculate_kqkt_metrics(df_main_group, group_by_col=None)
-        header_row.rename(columns={'index': 'Tên Đoàn kiểm toán'}, inplace=True)
-        header_row['Tên Đoàn kiểm toán'] = group_display_name
-        report_parts.append(header_row)
-
-        detail_rows = calculate_kqkt_metrics(df_main_group, group_by_col='Tên Đoàn kiểm toán')
-        detail_rows.rename(columns={'index': 'Tên Đoàn kiểm toán'}, inplace=True)
-        report_parts.append(detail_rows)
-
-    if not report_parts: return pd.DataFrame()
-
-    result_df = pd.concat(report_parts, ignore_index=True)
-    grand_total_row = calculate_kqkt_metrics(df_quarter, group_by_col=None)
-    grand_total_row['Tên Đoàn kiểm toán'] = 'TỔNG CỘNG (I+II+III)'
-    result_df = pd.concat([result_df, grand_total_row], ignore_index=True)
-    
-    final_cols_order = ['Tên Đoàn kiểm toán', 'Thời gian phát hành báo cáo', 'Tổng kiến nghị', 'Rất cao', 'Cao', 'Trung bình', 'Thấp', 'Đã khắc phục', 'Kiến nghị còn lại phải khắc phục']
-    result_df = result_df.reindex(columns=final_cols_order).fillna('')
-
-    date_col_name = 'Thời gian phát hành báo cáo'
-    result_df[date_col_name] = pd.to_datetime(result_df[date_col_name], errors='coerce').dt.strftime('%d/%m/%Y')
-    result_df = result_df.fillna('')
-
-    result_df.insert(0, 'Stt', range(1, len(result_df) + 1))
-    result_df = result_df.rename(columns={'Tên Đoàn kiểm toán': 'Tên Đoàn kiểm toán/Báo cáo', 'Đã khắc phục': 'Đã khắc phục trong thời gian'})
-    return result_df
-
 # ==============================================================================
 # PHẦN 3: GIAO DIỆN VÀ LUỒNG THỰC THI CỦA STREAMLIT
 # ==============================================================================
@@ -814,29 +718,10 @@ if uploaded_file is not None:
     st.write("Xem trước 5 dòng dữ liệu đầu tiên:")
     st.dataframe(df_raw.head())
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("🚀 Tạo 7 Báo cáo (Tổng hợp)"):
-            with st.spinner("⏳ Đang xử lý và tạo 7 báo cáo..."):
-                # df = df_raw.copy()
-                # dates = {'year_start_date': pd.to_datetime(f'{input_year}-01-01'), 'quarter_start_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01'), 'quarter_end_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01') + pd.offsets.QuarterEnd(0)}
-                # for col in ['Đơn vị thực hiện KPCS trong quý', 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)']:
-                #     if col in df.columns: df[col] = df[col].astype(str).str.strip().replace('nan', '')
-                # df['Nhom_Don_Vi'] = np.where(df['ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)'] == 'Hội sở', 'Hội sở', 'ĐVKD, AMC')
-                # df_hoiso = df[df['Nhom_Don_Vi'] == 'Hội sở'].copy()
-                # df_dvdk_amc = df[df['Nhom_Don_Vi'] == 'ĐVKD, AMC'].copy()
-                # PARENT_COL = 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)'
-                # CHILD_COL = 'Đơn vị thực hiện KPCS trong quý'
-
-                # df1 = create_summary_table(df, 'Nhom_Don_Vi', dates)
-                # df2 = create_summary_table(df_hoiso, PARENT_COL, dates)
-                # df3 = create_top_n_table(df_hoiso, 5, dates)
-                # df4 = create_hierarchical_table_7_reports(df_hoiso, PARENT_COL, CHILD_COL, dates)
-                # df5 = create_summary_table(df_dvdk_amc, PARENT_COL, dates)
-                # df6 = create_top_n_table(df_dvdk_amc, 10, dates)
-                # df7 = create_hierarchical_table_7_reports(df_dvdk_amc, PARENT_COL, CHILD_COL, dates)
-                dates = {'year_start_date': pd.to_datetime(f'{input_year}-01-01'), 'quarter_start_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01'), 'quarter_end_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01') + pd.offsets.QuarterEnd(0)}
+    if st.button("🚀 Tạo Báo cáo & Xuất Excel"):
+        with st.spinner("⏳ Đang xử lý dữ liệu và tạo các báo cáo... Vui lòng chờ trong giây lát."):
+            df = df_raw.copy()
+            dates = {'year_start_date': pd.to_datetime(f'{input_year}-01-01'), 'quarter_start_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01'), 'quarter_end_date': pd.to_datetime(f'{input_year}-{(input_quarter-1)*3 + 1}-01') + pd.offsets.QuarterEnd(0)}
 
             for col in ['Đơn vị thực hiện KPCS trong quý', 'SUM (THEO Khối, KV, ĐVKD, Hội sở, Ban Dự Án QLTS)', 'ĐVKD, AMC, Hội sở (Nhập ĐVKD hoặc Hội sở hoặc AMC)']:
                 if col in df.columns:
@@ -864,62 +749,42 @@ if uploaded_file is not None:
             df5 = create_summary_table(df_dvdk_amc, PARENT_COL, dates)
             df6 = create_top_n_table(df_dvdk_amc, 10, dates)
             df7 = create_hierarchical_table_7_reports(df_dvdk_amc, PARENT_COL, CHILD_COL, dates)
-                output_stream = BytesIO()
-                with pd.ExcelWriter(output_stream, engine='xlsxwriter') as writer:
-                    workbook = writer.book
-                    border_format = workbook.add_format({'border': 1, 'valign': 'vcenter'})
-                    def write_to_sheet(df_to_write, sheet_name, index=True):
-                        df_to_write.to_excel(writer, sheet_name=sheet_name, index=index)
-                        worksheet = writer.sheets[sheet_name]
-                        num_rows, num_cols = df_to_write.shape
-                        worksheet.conditional_format(0, 0, num_rows, num_cols + (1 if index else 0) - 1, {'type': 'no_blanks', 'format': border_format})
-                        for idx, col in enumerate(df_to_write.columns):
-                            series = df_to_write[col]
-                            max_len = max((series.astype(str).map(len).max(), len(str(series.name)))) + 2
-                            worksheet.set_column(idx + (1 if index else 0), idx + (1 if index else 0), max_len)
-                        if index:
-                            max_len_idx = max(df_to_write.index.astype(str).map(len).max(), len(str(df_to_write.index.name))) + 2
-                            worksheet.set_column(0, 0, max_len_idx)
-                    write_to_sheet(df1, "1_TH_ToanHang", index=True)
-                    write_to_sheet(df2, "2_TH_HoiSo", index=True)
-                    write_to_sheet(df3, "3_Top5_HoiSo", index=True)
-                    write_to_sheet(df4, "4_PhanCap_HoiSo", index=False)
-                    write_to_sheet(df5, "5_TH_DVDK_KhuVuc", index=True)
-                    write_to_sheet(df6, "6_Top10_DVDK", index=True)
-                    write_to_sheet(df7, "7_ChiTiet_DVDK", index=False)
-                excel_data = output_stream.getvalue()
-            st.success("🎉 Đã tạo xong file Excel Tổng hợp!")
-            st.download_button(label="📥 Tải xuống File Excel Tổng hợp", data=excel_data, file_name=f"Tong_hop_Bao_cao_KPCS_Q{input_quarter}_{input_year}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    with col2:
-        if st.button("📊 Tạo Báo cáo KQ Kiểm toán quý"):
-            with st.spinner("⏳ Đang xử lý và tạo báo cáo KQKT..."):
-                df = df_raw.copy()
-                # Thêm vào để đổi tên cột cho logic mới
-                df.rename(columns={'Xếp hạng rủi ro': 'Xếp hạng rủi ro  (Nhập theo định nghĩa ở Sheet DANHMUC)', 'Đã khắc phục': 'Đã khắc phục (Nếu đã khắc phục trong thời gian kiểm toán thì đánh dấu X)'}, inplace=True, errors='ignore')
-                
-                kqkt_df = generate_kqkt_report(df, year=input_year, quarter=input_quarter)
-                
-                output_stream_kqkt = BytesIO()
-                with pd.ExcelWriter(output_stream_kqkt, engine='xlsxwriter') as writer:
-                    workbook = writer.book
-                    border_format = workbook.add_format({'border': 1, 'valign': 'vcenter'})
-                    header_format = workbook.add_format({'bold': True, 'font_size': 16, 'align': 'center', 'valign': 'vcenter'})
-                    worksheet = writer.book.add_worksheet("KQ_KiemToan_Quy")
-                    writer.sheets["KQ_KiemToan_Quy"] = worksheet
-                    worksheet.merge_range('A1:J1', 'KẾT QUẢ KIỂM TOÁN TRONG QUÝ', header_format)
-                    
-                    kqkt_df.to_excel(writer, sheet_name="KQ_KiemToan_Quy", startrow=2, index=False)
-                    worksheet = writer.sheets["KQ_KiemToan_Quy"]
-                    num_rows, num_cols = kqkt_df.shape
-                    worksheet.conditional_format(2, 0, 2 + num_rows, num_cols - 1, {'type': 'no_blanks', 'format': border_format})
-                    for idx, col in enumerate(kqkt_df.columns):
-                        series = kqkt_df[col]
+            # --- GHI RA FILE EXCEL TRONG BỘ NHỚ VÀ THÊM KẺ KHUNG ---
+            output_stream = BytesIO()
+            with pd.ExcelWriter(output_stream, engine='xlsxwriter') as writer:
+                # ... (phần code ghi ra excel và định dạng không đổi)
+                workbook = writer.book
+                border_format = workbook.add_format({'border': 1, 'valign': 'vcenter'})
+                def write_to_sheet(df_to_write, sheet_name, index=True):
+                    df_to_write.to_excel(writer, sheet_name=sheet_name, index=index)
+                    worksheet = writer.sheets[sheet_name]
+                    num_rows, num_cols = df_to_write.shape
+                    worksheet.conditional_format(0, 0, num_rows, num_cols + (1 if index else 0) - 1, {'type': 'no_blanks', 'format': border_format})
+                    for idx, col in enumerate(df_to_write.columns):
+                        series = df_to_write[col]
                         max_len = max((series.astype(str).map(len).max(), len(str(series.name)))) + 2
-                        worksheet.set_column(idx, idx, max_len)
+                        worksheet.set_column(idx + (1 if index else 0), idx + (1 if index else 0), max_len)
+                    if index:
+                        max_len_idx = max(df_to_write.index.astype(str).map(len).max(), len(str(df_to_write.index.name))) + 2
+                        worksheet.set_column(0, 0, max_len_idx)
+                
+                write_to_sheet(df1, "1_TH_ToanHang", index=True)
+                write_to_sheet(df2, "2_TH_HoiSo", index=True)
+                write_to_sheet(df3, "3_Top5_HoiSo", index=True)
+                write_to_sheet(df4, "4_PhanCap_HoiSo", index=False)
+                write_to_sheet(df5, "5_TH_DVDK_KhuVuc", index=True)
+                write_to_sheet(df6, "6_Top10_DVDK", index=True)
+                write_to_sheet(df7, "7_ChiTiet_DVDK", index=False)
 
-                excel_data_kqkt = output_stream_kqkt.getvalue()
-            st.success("🎉 Đã tạo xong file Excel KQKT!")
-            st.download_button(label="📥 Tải xuống File KQKT Quý", data=excel_data_kqkt, file_name=f"KQ_KiemToan_Quy_{input_quarter}_{input_year}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            excel_data = output_stream.getvalue()
+
+        st.success("🎉 Đã tạo xong file Excel chứa 7 báo cáo!")
+        st.download_button(
+            label="📥 Tải xuống File Excel Tổng hợp",
+            data=excel_data,
+            file_name=f"Tong_hop_Bao_cao_KPCS_Q{input_quarter}_{input_year}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 else:
     st.info("💡 Vui lòng tải lên file Excel chứa dữ liệu thô để bắt đầu.")
