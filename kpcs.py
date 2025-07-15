@@ -701,7 +701,7 @@ def calculate_kqkt_metrics(df_group, group_by_col=None):
     if df_group.empty: return pd.DataFrame()
     
     # SỬA ĐỔI: Thay đổi tên cột cứng nhắc để khớp với tên cột phổ biến trong Excel
-    RISK_COL = 'Xếp hạng rủi ro'
+    RISK_COL = 'Xếp hạng rủi ro  (Nhập theo định nghĩa ở Sheet DANHMUC)'
     ISSUE_DATE_COL = 'Ngày, tháng, năm ban hành (mm/dd/yyyy)'
     FIXED_COL = 'Đã khắc phục (Nếu đã khắc phục trong thời gian kiểm toán thì đánh dấu X)'
 
